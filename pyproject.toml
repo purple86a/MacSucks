@@ -1,6 +1,6 @@
 [project]
 name = "macsucks"
-version = "0.1.0"
+version = "0.1.1"
 description = "Screen region OCR desktop app using LlamaCloud"
 readme = "README.md"
 license = { text = "PolyForm Noncommercial License 1.0.0" }
