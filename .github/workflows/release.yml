@@ -6,7 +6,7 @@ on:
       release:
         description: "Create GitHub release + MSI"
         type: boolean
-        default: false
+        default: true
       bump:
         description: "Version bump part"
         type: choice
@@ -15,18 +15,46 @@ on:
           - minor
           - major
         default: patch
+  push:
+    branches:
+      - master
+      - main
 
 permissions:
   contents: write
 
 jobs:
   build-release:
-    if: inputs.release == true
+    # Manual: release=true (default on dispatch).
+    # Push: commit message must include [release] or [release:patch|minor|major].
+    if: >
+      (github.event_name == 'workflow_dispatch' && inputs.release == true) ||
+      (github.event_name == 'push' && contains(github.event.head_commit.message, '[release]'))
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          # Need a token that can push the version-bump commit/tags back.
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve bump type
+        id: bump
+        shell: pwsh
+        run: |
+          $bump = "patch"
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            $bump = "${{ inputs.bump }}"
+          } else {
+            $msg = @"
+          ${{ github.event.head_commit.message }}
+          "@
+            if ($msg -match '\[release:(major)\]') { $bump = "major" }
+            elseif ($msg -match '\[release:(minor)\]') { $bump = "minor" }
+            elseif ($msg -match '\[release:(patch)\]' -or $msg -match '\[release\]') { $bump = "patch" }
+          }
+          echo "BUMP=$bump" >> $env:GITHUB_OUTPUT
+          Write-Host "Using bump: $bump"
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5
@@ -45,7 +73,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
       - name: Bump version
-        run: uv run bump2version ${{ inputs.bump }}
+        run: uv run bump2version ${{ steps.bump.outputs.BUMP }}
 
       - name: Read version
         id: version

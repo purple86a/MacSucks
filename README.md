@@ -54,7 +54,26 @@ uv run pyinstaller macsucks.spec --noconfirm
 
 ## Release
 
-In GitHub Actions, run the **Release** workflow with `release=true` and choose patch/minor/major bump. This will bump version, build `MacSucks.exe`, package an MSI, and publish a GitHub Release.
+Releases build an MSI and publish a GitHub Release.
+
+**From a push (flag in commit message):**
+
+```text
+[release]          → patch bump + release
+[release:minor]    → minor bump + release
+[release:major]    → major bump + release
+```
+
+Example:
+
+```powershell
+git commit -m "Polish toasts and installer [release]"
+git push
+```
+
+**Manual:** GitHub Actions → **Release** → Run workflow (`release=true`, choose bump).
+
+Ordinary pushes without `[release]` do **not** publish a release.
 
 ## Usage
 
@@ -65,4 +84,4 @@ In GitHub Actions, run the **Release** workflow with `release=true` and choose p
 
 ## License
 
-MIT
+[PolyForm Noncommercial License 1.0.0](LICENSE) — personal / noncommercial use only. Commercial use is not permitted.
