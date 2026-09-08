@@ -39,7 +39,17 @@
 
     <DirectoryRef Id="MACSUCKSROOT">
       <Component Id="MainExecutable" Guid="B1C2D3E4-F5A6-7890-BCDE-F12345678901">
-        <File Id="MacSucksExe" Source="dist\msi-stage\MacSucks.exe" KeyPath="yes" />
+        <!-- Per-user profile installs must use an HKCU registry KeyPath (ICE38). -->
+        <RegistryValue Root="HKCU"
+                       Key="Software\MacSucks"
+                       Name="InstallPath"
+                       Type="string"
+                       Value="[MACSUCKSROOT]"
+                       KeyPath="yes" />
+        <!-- Clean up profile directories on uninstall (ICE64). -->
+        <RemoveFolder Id="RemoveMacSucksRoot" Directory="MACSUCKSROOT" On="uninstall" />
+        <RemoveFolder Id="RemoveInstallFolder" Directory="INSTALLFOLDER" On="uninstall" />
+        <File Id="MacSucksExe" Source="dist\msi-stage\MacSucks.exe" />
       </Component>
     </DirectoryRef>
 
@@ -51,7 +61,7 @@
                   WorkingDirectory="MACSUCKSROOT"
                   Icon="AppIcon"
                   IconIndex="0" />
-        <RemoveFolder Id="ApplicationProgramsFolder" On="uninstall" />
+        <RemoveFolder Id="RemoveApplicationProgramsFolder" Directory="ApplicationProgramsFolder" On="uninstall" />
         <RegistryValue Root="HKCU"
                        Key="Software\MacSucks"
                        Name="installed"
