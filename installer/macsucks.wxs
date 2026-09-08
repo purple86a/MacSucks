@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <?define ProductVersion = "0.1.0" ?>
+  <?define ProductName = "MacSucks" ?>
+  <?define Manufacturer = "MacSucks" ?>
+  <?define UpgradeCode = "A1B2C3D4-E5F6-7890-ABCD-EF1234567890" ?>
+
+  <Product Id="*"
+           Name="$(var.ProductName)"
+           Language="1033"
+           Version="$(var.ProductVersion)"
+           Manufacturer="$(var.Manufacturer)"
+           UpgradeCode="$(var.UpgradeCode)">
+
+    <Package InstallerVersion="500"
+             Compressed="yes"
+             InstallScope="perUser"
+             Description="Screen region OCR via LlamaCloud"
+             Platform="x64" />
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of MacSucks is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <!-- Icon in Apps & Features -->
+    <Property Id="ARPPRODUCTICON" Value="AppIcon" />
+    <Property Id="ARPHELPLINK" Value="https://github.com/purple86a/MacSucks" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/purple86a/MacSucks" />
+
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="LocalAppDataFolder">
+        <Directory Id="INSTALLFOLDER" Name="Programs">
+          <Directory Id="MACSUCKSROOT" Name="MacSucks" />
+        </Directory>
+      </Directory>
+      <Directory Id="ProgramMenuFolder">
+        <Directory Id="ApplicationProgramsFolder" Name="MacSucks" />
+      </Directory>
+    </Directory>
+
+    <DirectoryRef Id="MACSUCKSROOT">
+      <Component Id="MainExecutable" Guid="B1C2D3E4-F5A6-7890-BCDE-F12345678901">
+        <File Id="MacSucksExe" Source="dist\msi-stage\MacSucks.exe" KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <DirectoryRef Id="ApplicationProgramsFolder">
+      <Component Id="StartMenuShortcut" Guid="C2D3E4F5-A6B7-8901-CDEF-123456789012">
+        <Shortcut Id="StartMenuShortcut"
+                  Name="MacSucks"
+                  Target="[MACSUCKSROOT]MacSucks.exe"
+                  WorkingDirectory="MACSUCKSROOT"
+                  Icon="AppIcon"
+                  IconIndex="0" />
+        <RemoveFolder Id="ApplicationProgramsFolder" On="uninstall" />
+        <RegistryValue Root="HKCU"
+                       Key="Software\MacSucks"
+                       Name="installed"
+                       Type="integer"
+                       Value="1"
+                       KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <!-- Startup Run key is managed by the app settings UI, not forced by MSI. -->
+
+    <Icon Id="AppIcon" SourceFile="src\macsucks\assets\app.ico" />
+
+    <Feature Id="Complete" Title="MacSucks" Level="1">
+      <ComponentRef Id="MainExecutable" />
+      <ComponentRef Id="StartMenuShortcut" />
+    </Feature>
+  </Product>
+</Wix>
