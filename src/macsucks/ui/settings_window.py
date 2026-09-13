@@ -430,7 +430,9 @@ class SettingsWindow(QWidget):
         if self._update_cooldown <= 0:
             self._cooldown_timer.stop()
             self.check_updates_btn.setEnabled(True)
-            self.update_status.setText("")
+            # Keep the last result text; only clear the "Wait Ns…" countdown.
+            if self.update_status.text().startswith("Wait "):
+                self.update_status.setText("")
         else:
             self._update_cooldown_label()
 

@@ -6,7 +6,7 @@ import logging
 import sys
 import threading
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QObject, QTimer, Signal
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QApplication, QMessageBox
 
@@ -21,12 +21,18 @@ from macsucks.tray import TrayIcon
 from macsucks.ui.log_handler import UiLogHandler
 from macsucks.ui.settings_window import SettingsWindow
 from macsucks.ui.toast import AppToast
-from macsucks.updater.checker import check_for_updates, utc_now_iso
+from macsucks.updater.checker import UpdateInfo, check_for_updates, utc_now_iso
 from macsucks.updater.installer import default_msi_path, download_msi, schedule_msi_install
 
 logger = logging.getLogger(__name__)
 
 UPDATE_INTERVAL_MS = 2 * 60 * 60 * 1000
+
+
+class _UpdateCheckBridge(QObject):
+    """Marshals update-check results onto the Qt UI thread."""
+
+    finished = Signal(object, str, bool)  # UpdateInfo | None, iso timestamp, manual
 
 
 class AppController:
@@ -40,6 +46,8 @@ class AppController:
         self._overlay: SelectionOverlay | None = None
         self._toast = AppToast()
         self._update_check_running = False
+        self._update_bridge = _UpdateCheckBridge()
+        self._update_bridge.finished.connect(self._on_update_check_finished)
 
         self._wire_signals()
         self._setup_logging()
@@ -184,61 +192,77 @@ class AppController:
 
     def _check_updates(self, *, manual: bool) -> None:
         if self._update_check_running:
+            if manual:
+                self.settings.set_update_message("Update check already running…")
             logger.debug("Update check already in progress; skipping")
             return
         self._update_check_running = True
         if manual:
-            self.settings.start_update_cooldown()
+            self.settings.set_update_message("Checking for updates…")
 
         def work() -> None:
-            info = None
+            info: UpdateInfo | None = None
             try:
                 info = check_for_updates()
-            finally:
-                ts = utc_now_iso()
-
-                def finish() -> None:
-                    self._update_check_running = False
-                    self.settings.set_last_update_check(ts)
-                    if info is None:
-                        msg = "Could not check for updates (repo not configured or offline)."
-                        if manual:
-                            self.settings.set_update_message(msg, error=True)
-                        return
-                    if not info.update_available:
-                        msg = f"You are on the latest version ({info.current_version})."
-                        if manual:
-                            self.settings.set_update_message(msg)
-                        return
-                    if not info.download_url:
-                        self.settings.set_update_message(
-                            "Update available but no MSI asset found on release.",
-                            error=True,
-                        )
-                        return
-
-                    dismissed = self.config.dismissed_update_version
-                    if (
-                        not manual
-                        and dismissed
-                        and dismissed == info.latest_version
-                    ):
-                        logger.info(
-                            "Skipping auto prompt for dismissed update v%s",
-                            info.latest_version,
-                        )
-                        return
-
-                    self._prompt_update(
-                        info.latest_version,
-                        info.download_url,
-                        info.release_notes,
-                        manual=manual,
-                    )
-
-                QTimer.singleShot(0, finish)
+            except Exception as exc:
+                logger.exception("Update check crashed: %s", exc)
+                info = None
+            self._update_bridge.finished.emit(info, utc_now_iso(), manual)
 
         threading.Thread(target=work, daemon=True).start()
+
+    def _on_update_check_finished(
+        self,
+        info: UpdateInfo | None,
+        ts: str,
+        manual: bool,
+    ) -> None:
+        self._update_check_running = False
+        self.settings.set_last_update_check(ts)
+
+        if info is None:
+            if manual:
+                self.settings.set_update_message(
+                    "Could not check for updates (repo not configured or offline).",
+                    error=True,
+                )
+                self.settings.start_update_cooldown()
+            return
+
+        if not info.update_available:
+            if manual:
+                self.settings.set_update_message(
+                    f"You are on the latest version ({info.current_version})."
+                )
+                self.settings.start_update_cooldown()
+            return
+
+        if not info.download_url:
+            self.settings.set_update_message(
+                "Update available but no MSI asset found on release.",
+                error=True,
+            )
+            if manual:
+                self.settings.start_update_cooldown()
+            return
+
+        dismissed = self.config.dismissed_update_version
+        if not manual and dismissed and dismissed == info.latest_version:
+            logger.info(
+                "Skipping auto prompt for dismissed update v%s",
+                info.latest_version,
+            )
+            return
+
+        if manual:
+            self.settings.start_update_cooldown()
+
+        self._prompt_update(
+            info.latest_version,
+            info.download_url,
+            info.release_notes,
+            manual=manual,
+        )
 
     def _prompt_update(
         self,
