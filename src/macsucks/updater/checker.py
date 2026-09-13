@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import logging
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 
 import httpx
 from packaging import version
@@ -16,6 +18,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_OWNER = "purple86a"
 DEFAULT_REPO = "MacSucks"
 GITHUB_API = "https://api.github.com/repos/{owner}/{repo}/releases/latest"
+USER_AGENT = f"MacSucks/{__version__} (+https://github.com/purple86a/MacSucks)"
 
 
 @dataclass(frozen=True)
@@ -34,9 +37,11 @@ class UpdateInfo:
 
 
 def _repo_config() -> tuple[str, str]:
+    # Frozen builds don't ship pyproject.toml next to the checker module.
+    if getattr(sys, "frozen", False):
+        return DEFAULT_OWNER, DEFAULT_REPO
     try:
         import tomllib
-        from pathlib import Path
 
         pyproject = Path(__file__).resolve().parents[3] / "pyproject.toml"
         if pyproject.exists():
@@ -57,7 +62,11 @@ def check_for_updates(timeout: float = 15.0) -> UpdateInfo | None:
         response = httpx.get(
             url,
             timeout=timeout,
-            headers={"Accept": "application/vnd.github+json"},
+            headers={
+                "Accept": "application/vnd.github+json",
+                "User-Agent": USER_AGENT,
+                "X-GitHub-Api-Version": "2022-11-28",
+            },
         )
         response.raise_for_status()
         data = response.json()
@@ -76,12 +85,19 @@ def check_for_updates(timeout: float = 15.0) -> UpdateInfo | None:
             download_url = asset.get("browser_download_url", "")
             break
 
-    return UpdateInfo(
+    info = UpdateInfo(
         current_version=__version__,
         latest_version=tag,
         download_url=download_url,
         release_notes=data.get("body") or "",
     )
+    logger.info(
+        "Update check: current=%s latest=%s available=%s",
+        info.current_version,
+        info.latest_version,
+        info.update_available,
+    )
+    return info
 
 
 def utc_now_iso() -> str:

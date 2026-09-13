@@ -50,6 +50,7 @@ class AppConfig:
     last_update_check: str | None = None
     api_key_verified: bool = False
     parse_tier: str = DEFAULT_PARSE_TIER
+    dismissed_update_version: str | None = None
 
     @classmethod
     def load(cls) -> AppConfig:

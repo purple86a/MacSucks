@@ -22,7 +22,7 @@ from macsucks.ui.log_handler import UiLogHandler
 from macsucks.ui.settings_window import SettingsWindow
 from macsucks.ui.toast import AppToast
 from macsucks.updater.checker import check_for_updates, utc_now_iso
-from macsucks.updater.installer import default_msi_path, download_msi, install_msi
+from macsucks.updater.installer import default_msi_path, download_msi, schedule_msi_install
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +39,7 @@ class AppController:
         self._ocr_worker: OcrWorker | None = None
         self._overlay: SelectionOverlay | None = None
         self._toast = AppToast()
+        self._update_check_running = False
 
         self._wire_signals()
         self._setup_logging()
@@ -182,56 +183,121 @@ class AppController:
         self._toast.show_error(message)
 
     def _check_updates(self, *, manual: bool) -> None:
+        if self._update_check_running:
+            logger.debug("Update check already in progress; skipping")
+            return
+        self._update_check_running = True
         if manual:
             self.settings.start_update_cooldown()
 
         def work() -> None:
-            info = check_for_updates()
-            ts = utc_now_iso()
+            info = None
+            try:
+                info = check_for_updates()
+            finally:
+                ts = utc_now_iso()
 
-            def finish() -> None:
-                self.settings.set_last_update_check(ts)
-                if info is None:
-                    msg = "Could not check for updates (repo not configured or offline)."
-                    if manual:
-                        self.settings.set_update_message(msg, error=True)
-                    return
-                if not info.update_available:
-                    msg = f"You are on the latest version ({info.current_version})."
-                    if manual:
-                        self.settings.set_update_message(msg)
-                    return
-                if not info.download_url:
-                    self.settings.set_update_message(
-                        "Update available but no MSI asset found on release.",
-                        error=True,
+                def finish() -> None:
+                    self._update_check_running = False
+                    self.settings.set_last_update_check(ts)
+                    if info is None:
+                        msg = "Could not check for updates (repo not configured or offline)."
+                        if manual:
+                            self.settings.set_update_message(msg, error=True)
+                        return
+                    if not info.update_available:
+                        msg = f"You are on the latest version ({info.current_version})."
+                        if manual:
+                            self.settings.set_update_message(msg)
+                        return
+                    if not info.download_url:
+                        self.settings.set_update_message(
+                            "Update available but no MSI asset found on release.",
+                            error=True,
+                        )
+                        return
+
+                    dismissed = self.config.dismissed_update_version
+                    if (
+                        not manual
+                        and dismissed
+                        and dismissed == info.latest_version
+                    ):
+                        logger.info(
+                            "Skipping auto prompt for dismissed update v%s",
+                            info.latest_version,
+                        )
+                        return
+
+                    self._prompt_update(
+                        info.latest_version,
+                        info.download_url,
+                        info.release_notes,
+                        manual=manual,
                     )
-                    return
-                self._prompt_update(info.latest_version, info.download_url, info.release_notes)
 
-            QTimer.singleShot(0, finish)
+                QTimer.singleShot(0, finish)
 
         threading.Thread(target=work, daemon=True).start()
 
-    def _prompt_update(self, version: str, url: str, notes: str) -> None:
-        box = QMessageBox(self.settings)
+    def _prompt_update(
+        self,
+        version: str,
+        url: str,
+        notes: str,
+        *,
+        manual: bool = False,
+    ) -> None:
+        box = QMessageBox(self.settings if self.settings.isVisible() else None)
         box.setWindowTitle("Update Available")
         box.setText(f"MacSucks v{version} is available.")
-        box.setInformativeText(notes[:500] if notes else "Download and install now?")
-        box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        box.setInformativeText(
+            (notes[:500] + ("…" if len(notes) > 500 else ""))
+            if notes
+            else "Download and install now? The app will restart after installing."
+        )
+        box.setStandardButtons(
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
         if box.exec() != QMessageBox.StandardButton.Yes:
+            self.config.dismissed_update_version = version
+            self.config.save()
+            if manual:
+                self.settings.set_update_message(
+                    f"Update to v{version} dismissed. You can check again later."
+                )
             return
+
+        self.config.dismissed_update_version = None
+        self.config.save()
 
         def download_and_install() -> None:
             try:
                 dest = default_msi_path(version)
                 download_msi(url, dest)
-                QTimer.singleShot(0, lambda: install_msi(dest))
+
+                def start_install() -> None:
+                    self.settings.set_update_message("Installing update…")
+                    try:
+                        schedule_msi_install(dest)
+                    except Exception as exc:
+                        logger.error("Could not schedule MSI install: %s", exc)
+                        self.settings.set_update_message(
+                            f"Update failed: {exc}", error=True
+                        )
+                        self._toast.show_error(f"Update failed: {exc}")
+                        return
+                    self._toast.show_success("Installing update — MacSucks will restart.")
+                    QTimer.singleShot(800, self.quit)
+
+                QTimer.singleShot(0, start_install)
             except Exception as exc:
                 logger.error("Update download failed: %s", exc)
                 QTimer.singleShot(
                     0,
-                    lambda: self.settings.set_update_message(f"Update failed: {exc}", error=True),
+                    lambda: self.settings.set_update_message(
+                        f"Update failed: {exc}", error=True
+                    ),
                 )
 
         self.settings.set_update_message("Downloading update…")
