@@ -13,7 +13,6 @@ Repo: [purple86a/MacSucks](https://github.com/purple86a/MacSucks)
 - Auto-update checks on launch, every 2 hours, and manually (with cooldown)
 - MSI releases via GitHub Actions
 
-
 ## Requirements
 
 - Windows 10/11
