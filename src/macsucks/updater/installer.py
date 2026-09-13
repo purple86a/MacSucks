@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import subprocess
 import sys
 import tempfile
@@ -51,6 +52,10 @@ def build_update_batch(msi_path: Path, relaunch_exe: Path | None = None) -> str:
     Plain `msiexec` from cmd returns immediately (GUI subsystem), so without
     `start /wait` the app was relaunched while the old EXE was still locked and
     the upgrade never stuck — endless update prompts.
+
+    Relaunch must set PYINSTALLER_RESET_ENVIRONMENT=1 and clear inherited
+    ``_PYI_*`` vars; otherwise the onefile bootloader thinks it is a worker
+    child of cmd.exe and aborts with a security validation error.
     """
     msi = str(msi_path.resolve())
     log = str((msi_path.parent / "msi-update.log").resolve())
@@ -68,6 +73,9 @@ def build_update_batch(msi_path: Path, relaunch_exe: Path | None = None) -> str:
         "if %ERR%==3010 goto relaunch",
         "exit /b %ERR%",
         ":relaunch",
+        "rem PyInstaller onefile: start a fresh instance, not a worker child",
+        "set PYINSTALLER_RESET_ENVIRONMENT=1",
+        "for /f \"tokens=1 delims==\" %%V in ('set _PYI_ 2^>nul') do set \"%%V=\"",
     ]
     if relaunch_exe is not None:
         exe = str(relaunch_exe.resolve())
@@ -75,6 +83,17 @@ def build_update_batch(msi_path: Path, relaunch_exe: Path | None = None) -> str:
     lines.append("exit /b 0")
     lines.append("")
     return "\r\n".join(lines)
+
+
+def _clean_env_for_updater() -> dict[str, str]:
+    """Env for the install helper — strip PyInstaller process-state variables."""
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith("_PYI_") and key != "_MEIPASS2"
+    }
+    env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
+    return env
 
 
 def schedule_msi_install(msi_path: Path) -> None:
@@ -101,6 +120,7 @@ def schedule_msi_install(msi_path: Path) -> None:
     subprocess.Popen(
         ["cmd.exe", "/c", str(batch)],
         cwd=str(msi_path.parent),
+        env=_clean_env_for_updater(),
         creationflags=CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP,
         close_fds=True,
     )
