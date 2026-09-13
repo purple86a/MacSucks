@@ -89,7 +89,9 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
       - name: Bump version
-        run: uv run bump2version ${{ steps.bump.outputs.BUMP }}
+        # --frozen/--no-sync: plain `uv run` rewrites uv.lock before the tool starts,
+        # which makes bump2version abort on a dirty tree.
+        run: uv run --frozen --no-sync bump2version ${{ steps.bump.outputs.BUMP }}
 
       - name: Read version
         id: version
@@ -99,7 +101,7 @@ jobs:
           echo "VERSION=$v" >> $env:GITHUB_OUTPUT
 
       - name: Build executable
-        run: uv run pyinstaller macsucks.spec --noconfirm
+        run: uv run --frozen --no-sync pyinstaller macsucks.spec --noconfirm
 
       - name: Stage release binary
         shell: pwsh
