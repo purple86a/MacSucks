@@ -103,11 +103,16 @@ class AppController:
             )
 
     def _ensure_startup(self) -> None:
-        if self.config.startup_enabled and not is_startup_enabled():
-            try:
+        # Re-write the Run key whenever startup is desired but missing or stale
+        # (e.g. still pointing at a old `uv run` / main.py path after MSI install).
+        if not self.config.startup_enabled:
+            return
+        try:
+            if not is_startup_enabled():
                 enable_startup()
-            except Exception as exc:
-                logger.warning("Could not enable startup: %s", exc)
+                logger.info("Startup registry synced for current install")
+        except Exception as exc:
+            logger.warning("Could not enable startup: %s", exc)
 
     def _setup_update_timer(self) -> None:
         self._update_timer = QTimer()
