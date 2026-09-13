@@ -65,7 +65,19 @@ jobs:
         run: uv python install 3.11
 
       - name: Install dependencies
-        run: uv sync --all-groups
+        run: uv sync --all-groups --frozen
+
+      - name: Ensure clean tree for bump2version
+        shell: pwsh
+        run: |
+          # uv must not leave the lockfile dirty; bump2version requires a clean tree.
+          git checkout -- uv.lock
+          git status --porcelain
+          if (git status --porcelain) {
+            Write-Host "Working tree still dirty after restoring uv.lock:"
+            git status --porcelain
+            exit 1
+          }
 
       - name: Configure git
         run: |
