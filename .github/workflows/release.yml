@@ -26,10 +26,13 @@ permissions:
 jobs:
   build-release:
     # Manual: release=true (default on dispatch).
-    # Push: commit message must include [release] or [release:patch|minor|major].
+    # Push: any commit in the push whose message includes [release] / [release:bump].
     if: >
       (github.event_name == 'workflow_dispatch' && inputs.release == true) ||
-      (github.event_name == 'push' && contains(github.event.head_commit.message, '[release]'))
+      (github.event_name == 'push' && (
+        contains(github.event.head_commit.message, '[release]') ||
+        contains(toJSON(github.event.commits.*.message), '[release]')
+      ))
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
