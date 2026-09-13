@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import sys
 import threading
+from pathlib import Path
 
 from PySide6.QtCore import QObject, QTimer, Signal
 from PySide6.QtGui import QGuiApplication
@@ -35,6 +36,17 @@ class _UpdateCheckBridge(QObject):
     finished = Signal(object, str, bool)  # UpdateInfo | None, iso timestamp, manual
 
 
+class _UpdateDownloadBridge(QObject):
+    """Marshals MSI download results onto the Qt UI thread.
+
+    QTimer.singleShot from a worker thread is unreliable in Qt — same class of bug
+    as the stuck Check for Updates button.
+    """
+
+    succeeded = Signal(str)  # msi path
+    failed = Signal(str)  # error message
+
+
 class AppController:
     def __init__(self, app: QApplication) -> None:
         self.app = app
@@ -48,6 +60,9 @@ class AppController:
         self._update_check_running = False
         self._update_bridge = _UpdateCheckBridge()
         self._update_bridge.finished.connect(self._on_update_check_finished)
+        self._download_bridge = _UpdateDownloadBridge()
+        self._download_bridge.succeeded.connect(self._on_update_download_succeeded)
+        self._download_bridge.failed.connect(self._on_update_download_failed)
 
         self._wire_signals()
         self._setup_logging()
@@ -299,33 +314,30 @@ class AppController:
             try:
                 dest = default_msi_path(version)
                 download_msi(url, dest)
-
-                def start_install() -> None:
-                    self.settings.set_update_message("Installing update…")
-                    try:
-                        schedule_msi_install(dest)
-                    except Exception as exc:
-                        logger.error("Could not schedule MSI install: %s", exc)
-                        self.settings.set_update_message(
-                            f"Update failed: {exc}", error=True
-                        )
-                        self._toast.show_error(f"Update failed: {exc}")
-                        return
-                    self._toast.show_success("Installing update — MacSucks will restart.")
-                    QTimer.singleShot(800, self.quit)
-
-                QTimer.singleShot(0, start_install)
+                self._download_bridge.succeeded.emit(str(dest))
             except Exception as exc:
                 logger.error("Update download failed: %s", exc)
-                QTimer.singleShot(
-                    0,
-                    lambda: self.settings.set_update_message(
-                        f"Update failed: {exc}", error=True
-                    ),
-                )
+                self._download_bridge.failed.emit(str(exc))
 
         self.settings.set_update_message("Downloading update…")
+        self._toast.show_processing("Downloading update…")
         threading.Thread(target=download_and_install, daemon=True).start()
+
+    def _on_update_download_succeeded(self, msi_path: str) -> None:
+        self.settings.set_update_message("Installing update…")
+        try:
+            schedule_msi_install(Path(msi_path))
+        except Exception as exc:
+            logger.error("Could not schedule MSI install: %s", exc)
+            self.settings.set_update_message(f"Update failed: {exc}", error=True)
+            self._toast.show_error(f"Update failed: {exc}")
+            return
+        self._toast.show_success("Installing update — MacSucks will restart.")
+        QTimer.singleShot(800, self.quit)
+
+    def _on_update_download_failed(self, message: str) -> None:
+        self.settings.set_update_message(f"Update failed: {message}", error=True)
+        self._toast.show_error(f"Update failed: {message}")
 
     def quit(self) -> None:
         self._toast.hide_toast()
