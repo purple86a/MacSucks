@@ -333,7 +333,8 @@ class AppController:
             self._toast.show_error(f"Update failed: {exc}")
             return
         self._toast.show_success("Installing update — MacSucks will restart.")
-        QTimer.singleShot(800, self.quit)
+        # Leave enough time for the detached installer process to spawn.
+        QTimer.singleShot(1500, self.quit)
 
     def _on_update_download_failed(self, message: str) -> None:
         self.settings.set_update_message(f"Update failed: {message}", error=True)
